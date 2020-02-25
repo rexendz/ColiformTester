@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from arduino import SerialListener
+from predictor import ColiformPrediction
+import numpy as np
 import os
 import sys
 
@@ -46,13 +48,71 @@ class Worker1(QObject): # Worker class inherits from QObject, acts like asynctas
         self.continue_run = True # Sets worker class to run loop or not
 
     def do_work(self):
-        # while self.continue_run:  # give the loop a stoppable condition
-            # self.arduino.resume() # Resumes python listening of arduino
-            # reading = self.arduino.read() # Reads data from arduino
-            # if reading == "OK": # If arduino sends data "OK"
-            #    self.probeDetected.emit() # Sends signal that probe is detected
-            #    self.stop() # Stops the worker
-        # self.reader.pause() # Pauses reading of data from arduino
+        while self.continue_run:  # give the loop a stoppable condition
+            self.arduino.resume() # Resumes python listening of arduino
+            reading = self.arduino.read() # Reads data from arduino
+            if reading == "OK": # If arduino sends data "OK"
+                self.probeDetected.emit() # Sends signal that probe is detected
+                self.stop() # Stops the worker
+        self.reader.pause() # Pauses reading of data from arduino
+        self.finished.emit() # Sends signal that the worker has finished its task.
+
+    def stop(self):
+        self.continue_run = False # Function that Stops the loop
+
+
+class Worker2(QObject): # Worker class inherits from QObject, acts like asynctask (run from background)
+    finished = pyqtSignal()  # give worker class a finished signal
+    dataTransmit = pyqtSignal(float, int)
+
+    def __init__(self, arduino, parent=None): # constructor of worker class
+        QObject.__init__(self, parent=parent) # Initialize Qobject constructor
+        self.arduino = arduino # Save arduino listener
+        self.continue_run = True # Sets worker class to run loop or not
+        self.impedanceRead = 0
+
+    def do_work(self):
+        while self.continue_run:  # give the loop a stoppable condition
+            self.arduino.resume() # Resumes python listening of arduino
+            self.arduino.write("0")
+            while self.impedanceRead == 0:
+                impedance1 = self.arduino.read()
+                if impedance1 is not None:
+                    self.dataTransmit.emit(impedance1, self.impedanceRead)
+                    self.arduino.write("1")
+                    self.impedanceRead += 1
+            while self.impedanceRead == 1:
+                impedance2 = self.arduino.read()
+                if impedance2 is not None:
+                    self.dataTransmit.emit(impedance2, self.impedanceRead)
+                    self.arduino.write("2")
+                    self.impedanceRead += 1
+            while self.impedanceRead == 2:
+                impedance3 = self.arduino.read()
+                if impedance3 is not None:
+                    self.dataTransmit.emit(impedance3, self.impedanceRead)
+                    self.arduino.write("3")
+                    self.impedanceRead += 1
+            while self.impedanceRead == 3:
+                impedance4 = self.arduino.read()
+                if impedance4 is not None:
+                    self.dataTransmit.emit(impedance4, self.impedanceRead)
+                    self.arduino.write("4")
+                    self.impedanceRead += 1
+            while self.impedanceRead == 4:
+                impedance5 = self.arduino.read()
+                if impedance5 is not None:
+                    self.dataTransmit.emit(impedance5, self.impedanceRead)
+                    self.arduino.write("5")
+                    self.impedanceRead += 1
+            while self.impedanceRead == 5:
+                impedance6 = self.arduino.read()
+                if impedance6 is not None:
+                    self.dataTransmit.emit(impedance6, self.impedanceRead)
+                    self.arduino.write("R")
+                    self.impedanceRead += 1
+                    self.stop() # Stops the worker
+        self.reader.pause() # Pauses reading of data from arduino
         self.finished.emit() # Sends signal that the worker has finished its task.
 
     def stop(self):
@@ -71,7 +131,7 @@ class StartPage(Window): # First window of the program inherits from class Windo
         self.InitWindow() # Initialize the window
         self.InitLayout() # Initialize the layout
         self.InitComponents() # Initialize the components
-        self.InitWorker() # Initialize the worker
+        #self.InitWorker() # Initialize the worker
         self.show() # Show the window
 
     def InitComponents(self): # This function creates the components
@@ -172,10 +232,17 @@ class TestPage(Window): # Third page of program inheriting from class Window
 
     def __init__(self): # Constructor of the third page
         super().__init__() # Starts the constructor of Window
+        self.thread = None
+        self.worker = None
+        self.result = None
+        self.lbl2 = None
+        self.imp1, self.imp2, self.imp3, self.imp4, self.imp5, self.imp6 = None, None, None, None, None, None
+        self.predictor = ColiformPrediction()
         self.table = None  # Table for the testpage
         self.InitWindow() # Initializes the window
         self.InitLayout() # Initializes the layout
         self.InitComponents() # Initializes the components
+        # self.InitWorker()
 
         self.show() # Show the window
 
@@ -183,6 +250,8 @@ class TestPage(Window): # Third page of program inheriting from class Window
         lbl1 = QLabel("TCT Data Acquisition...")
         lbl1.setStyleSheet("color: #4FC3F7; font-family: Sanserif; font: 25px")
         lbl1.setAlignment(Qt.AlignHCenter)
+        self.lbl2 = QLabel()
+        self.lbl2.setStyleSheet("color: #4FC3F7; font-family: Sanserif; font: 10px")
 
         self.table = QTableWidget(self) # Create a new table
         self.table.setColumnCount(6) # Set column number to 6
@@ -198,6 +267,51 @@ class TestPage(Window): # Third page of program inheriting from class Window
 
         self.vbox.addWidget(lbl1) # add label to layout
         self.vbox.addWidget(self.table) # Add table to layout
+        self.vbox.addWidget(self.lbl2)
+
+    def InitWorker(self):
+        self.thread = QThread(parent=self) # Creates a new thread
+        self.worker = Worker2(self.arduino) # Creates a new worker passing arduino listener
+
+        self.stop_signal.connect(self.worker.stop) # Set the stop_signal of this class to point to worker's stop function
+        self.worker.moveToThread(self.thread) # Move the worker to the thread
+
+        self.worker.dataTransmit.connect(self.dataChange)
+
+        self.worker.finished.connect(self.thread.quit)  # connect the workers finished signal to stop thread
+        self.worker.finished.connect(self.worker.deleteLater)  # connect the workers finished signal to clean up worker
+        self.thread.finished.connect(self.thread.deleteLater)  # connect threads finished signal to clean up thread
+        self.thread.finished.connect(self.worker.stop) # connect threads finished signal to stop the worker
+
+        self.thread.started.connect(self.worker.do_work) #  when the thread starts, the worker will start its loop
+
+        self.thread.start() # Starts the thread
+
+    def dataChange(self, data, index):
+        if index == 0:
+            self.imp1 = data
+            self.table.setItem(0, 0, QTableWidgetItem("{0:.2f}".format(data)))
+        elif index == 1:
+            self.imp2 = data
+            self.table.setItem(0, 1, QTableWidgetItem("{0:.2f}".format(data)))
+        elif index == 2:
+            self.imp3 = data
+            self.table.setItem(0, 2, QTableWidgetItem("{0:.2f}".format(data)))
+        elif index == 3:
+            self.imp4 = data
+            self.table.setItem(0, 3, QTableWidgetItem("{0:.2f}".format(data)))
+        elif index == 4:
+            self.imp5 = data
+            self.table.setItem(0, 4, QTableWidgetItem("{0:.2f}".format(data)))
+        elif index == 5:
+            self.imp6 = data
+            self.table.setItem(0, 5, QTableWidgetItem("{0:.2f}".format(data)))
+            dataset = np.array([[self.imp1, self.imp2, self.imp3, self.imp4, self.imp5, self.imp6]], dtype=np.float32)
+            self.result = self.predictor.getDataResult(dataset)
+            if self.result == 1:
+                self.lbl2.setText('Coliform Positive')
+            else:
+                self.lbl2.setText("Coliform Negative")
 
 
 class Controller:
@@ -224,7 +338,6 @@ class Controller:
         if prev_window is not None: #If there is a previous window
             prev_window.hide() # Hide the previous window
         self.TestPage = TestPage() # Show the test page
-
 
 
 if __name__ == "__main__": # If the program starts this file
